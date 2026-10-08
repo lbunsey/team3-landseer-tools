@@ -9,6 +9,7 @@ model = get_LLMagent_model()
 
 agent = create_deep_agent(
     model=model,
+    tools=[list_datasets],
     system_prompt="You are a helpful research assistant."
 )
 
