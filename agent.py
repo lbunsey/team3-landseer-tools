@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 from deepagents import create_deep_agent
 from model_factory import get_LLMagent_model
 from langchain_core.messages import HumanMessage
+from tools import *
 
 load_dotenv()
 
@@ -9,7 +10,7 @@ model = get_LLMagent_model()
 
 agent = create_deep_agent(
     model=model,
-    tools=[list_datasets],
+    tools=TOOLS,
     system_prompt="You are a helpful research assistant."
 )
 
