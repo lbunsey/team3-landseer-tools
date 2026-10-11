@@ -70,3 +70,38 @@ python agent.py
 ```
 
 To end the conversation, type `exit` or `quit`.
+
+## Project Structure
+
+```text
+Landseer Agent Tools/
+├── agent.py
+├── tools/
+│   ├── __init__.py
+│   ├── clone_repo.py
+│   ├── list_datasets.py
+|   └── ... 
+├── repos/
+├── .env.example
+├── requirements.txt
+└── README.md
+```
+
+The `tools/` directory contains the tools available to the agent.
+
+`tools/__init__.py` serves as the central tool registry. When adding a new tool, add its import and include it in the `TOOLS` list in `tools/__init__.py`.
+
+For example:
+
+```python
+from .clone_repo import clone_repo
+from .list_datasets import list_datasets
+from .new_tool import new_tool
+
+TOOLS = [
+    clone_repo,
+    list_datasets,
+    new_tool,
+]
+```
+
