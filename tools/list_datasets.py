@@ -11,7 +11,7 @@ from pathlib import Path
 
 from langchain_core.tools import tool
 
-REPOS_DIR = Path(__file__).resolve().parent / "repos"
+REPOS_DIR = Path(__file__).resolve().parent.parent / "repos"
 SKIP_DIRS = {"venv", "env", "node_modules", "__pycache__", "site-packages", "build", "dist"}
 
 # Kinds of evidence, strongest first, with the label shown to the user.
