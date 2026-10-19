@@ -64,7 +64,7 @@ def chat():
         messages.append(HumanMessage(content=user_input))
         
         # Call agent and show progress
-        print("[DEBUG] Sending request to agent...", flush=True)
+        print("[DEBUG][agent] Sending request to agent...", flush=True)
         
         try:
             result = agent.invoke(
@@ -72,10 +72,10 @@ def chat():
                 config={"recursion_limit": 20},
             )
         except Exception as e:
-            print(f"[ERROR] {type(e).__name__}: {e}", flush=True)
+            print(f"[ERROR][agent] {type(e).__name__}: {e}", flush=True)
             continue
         
-        print("[DEBUG] Agent invocation completed.", flush=True)
+        print("[DEBUG][agent] Agent invocation completed.", flush=True)
         
         # update conversation history, keeping Agent and tool messages
         messages = result["messages"]

@@ -178,7 +178,7 @@ def list_datasets(repo_name: str) -> str:
     """
     name = repo_name.strip().rstrip("/")
     
-    print(f"[DEBUG] list_datasets started: {name}", flush=True)
+    print(f"[DEBUG][list_datasets] list_datasets started: {name}", flush=True)
 
     if not name or Path(name).name != name or name in (".", ".."):   # a folder name, not a path
         return "Error: repo_name must be a folder name inside 'repos', not a path."
@@ -187,24 +187,24 @@ def list_datasets(repo_name: str) -> str:
         available = sorted(p.name for p in REPOS_DIR.iterdir() if p.is_dir()) if REPOS_DIR.is_dir() else []
         return f"Error: repo '{name}' not found in repos/. Available repos: {', '.join(available) or 'none'}."
     
-    print(f"[DEBUG] Scanning repository: {root}", flush=True)
+    print(f"[DEBUG][list_datasets] Scanning repository: {root}", flush=True)
     
     try:
         found, mentioned, count = scan_repo(root)
 
         print(
-            f"[DEBUG] Scan completed: {count} files, ",
+            f"[DEBUG][list_datasets] Scan completed: {count} files, ",
             flush=True,
         )
 
         report = make_report(name, found, mentioned, count)[:6000]
 
-        print("[DEBUG] list_datasets finished.", flush=True)
+        print("[DEBUG][list_datasets] list_datasets finished.", flush=True)
         return report
 
     except Exception as e:
         print(
-            f"[ERROR] list_datasets failed: "
+            f"[ERROR][list_datasets] list_datasets failed: "
             f"{type(e).__name__}: {e}",
             flush=True,
         )

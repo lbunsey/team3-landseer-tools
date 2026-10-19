@@ -172,20 +172,20 @@ def inspect_repo(repo_name: str, file_path: str = "") -> str:
     """
     
     print(
-        f"[DEBUG] inspect_repo started: {repo_name}",
+        f"[DEBUG][inspect_repo] inspect_repo started: {repo_name}",
         flush=True,
     )
 
     try:
         print(
-            f"[DEBUG] Resolving repository: {repo_name}",
+            f"[DEBUG][inspect_repo] Resolving repository: {repo_name}",
             flush=True,
         )
 
         root = get_repo_root(repo_name)
 
         print(
-            f"[DEBUG] Repository resolved: {root}",
+            f"[DEBUG][inspect_repo] Repository resolved: {root}",
             flush=True,
         )
 
@@ -195,7 +195,7 @@ def inspect_repo(repo_name: str, file_path: str = "") -> str:
 
             if relative.is_absolute() or ".." in relative.parts:
                 print(
-                    f"[ERROR] Invalid file path: {file_path}",
+                    f"[ERROR][inspect_repo] Invalid file path: {file_path}",
                     flush=True,
                 )
                 return "Error: file_path must stay inside the repository."
@@ -204,7 +204,7 @@ def inspect_repo(repo_name: str, file_path: str = "") -> str:
 
             if not is_safe_text_file(target):
                 print(
-                    f"[ERROR] File cannot be read: {file_path}",
+                    f"[ERROR][inspect_repo] File cannot be read: {file_path}",
                     flush=True,
                 )
                 return (
@@ -216,14 +216,14 @@ def inspect_repo(repo_name: str, file_path: str = "") -> str:
 
             if not resolved_target.is_relative_to(root):
                 print(
-                    f"[ERROR] File path points outside repository: "
+                    f"[ERROR][inspect_repo] File path points outside repository: "
                     f"{file_path}",
                     flush=True,
                 )
                 return "Error: file_path points outside the repository."
 
             print(
-                f"[DEBUG] Reading file: {relative.as_posix()}",
+                f"[DEBUG][inspect_repo] Reading file: {relative.as_posix()}",
                 flush=True,
             )
 
@@ -237,12 +237,12 @@ def inspect_repo(repo_name: str, file_path: str = "") -> str:
             )
 
             print(
-                f"[DEBUG] File read completed: "
+                f"[DEBUG][inspect_repo] File read completed: "
                 f"{relative.as_posix()}",
                 flush=True,
             )
             print(
-                "[DEBUG] inspect_repo finished.",
+                "[DEBUG][inspect_repo] inspect_repo finished.",
                 flush=True,
             )
 
@@ -250,7 +250,7 @@ def inspect_repo(repo_name: str, file_path: str = "") -> str:
 
         # Mode 2: scan the repository and prioritize relevant files.
         print(
-            f"[DEBUG] Scanning repository: {root}",
+            f"[DEBUG][inspect_repo] Scanning repository: {root}",
             flush=True,
         )
 
@@ -292,7 +292,7 @@ def inspect_repo(repo_name: str, file_path: str = "") -> str:
         candidates.sort(key=lambda item: (-item[0], item[1]))
 
         print(
-            f"[DEBUG] Scan completed: {len(all_files)} files,",
+            f"[DEBUG][inspect_repo] Scan completed: {len(all_files)} files,",
             flush=True,
         )
 
@@ -325,7 +325,7 @@ def inspect_repo(repo_name: str, file_path: str = "") -> str:
                 content = read_text_file(path)
             except (OSError, UnicodeError) as exc:
                 print(
-                    f"[ERROR] Failed to read {rel}: "
+                    f"[ERROR][inspect_repo] Failed to read {rel}: "
                     f"{type(exc).__name__}: {exc}",
                     flush=True,
                 )
@@ -354,7 +354,7 @@ def inspect_repo(repo_name: str, file_path: str = "") -> str:
         result = "\n".join(lines)
 
         print(
-            f"[DEBUG] inspect_repo finished: "
+            f"[DEBUG][inspect_repo] inspect_repo finished: "
             f"{len(all_files)} files scanned",
             flush=True,
         )
@@ -363,7 +363,7 @@ def inspect_repo(repo_name: str, file_path: str = "") -> str:
 
     except (ValueError, FileNotFoundError) as exc:
         print(
-            f"[ERROR] inspect_repo failed: "
+            f"[ERROR][inspect_repo] inspect_repo failed: "
             f"{type(exc).__name__}: {exc}",
             flush=True,
         )
@@ -371,7 +371,7 @@ def inspect_repo(repo_name: str, file_path: str = "") -> str:
 
     except OSError as exc:
         print(
-            f"[ERROR] inspect_repo failed: "
+            f"[ERROR][inspect_repo] inspect_repo failed: "
             f"{type(exc).__name__}: {exc}",
             flush=True,
         )
