@@ -68,6 +68,9 @@ def chat():
             for call in getattr(m, "tool_calls", None) or []:
                 print(f"  [tool] {call['name']}({call['args']})")
 
+        # get and display the latest response
+        response = messages[-1].content
+
         if isinstance(response, str):
             print(f"Research Assistant: {response}\n")
         else:
