@@ -1,23 +1,21 @@
 from dotenv import load_dotenv
 from deepagents import create_deep_agent
+from langchain.agents.middleware import ModelRetryMiddleware
 from model_factory import get_LLMagent_model
 from langchain_core.messages import HumanMessage
-from langchain.agents.middleware import ModelRetryMiddleware
 from tools import *
 
 load_dotenv()
 
 model = get_LLMagent_model()
 
-agent = create_deep_agent(
-    model=model,
-    tools=TOOLS,
-    system_prompt="""You are a research assistant that analyzes machine learning GitHub repos.
-    To find a repo's supported models: clone it with clone_repo, run list_models for leads,
-    then open the cited files with read_repo_file to confirm what each hit really is (a full
-    model, a layer, a config option). Use search_repo for anything the scanner missed.
-    Answer with the confirmed list and cite file:line for each model."""    
-)
+SYSTEM_PROMPT = """You are a research assistant that analyzes machine learning GitHub repos.
+Workflow: clone the repo with clone_repo, run list_models for leads, then open the cited
+files with read_repo_file to confirm them. Use search_repo for anything the scanner missed.
+"Supported" means a model that can be selected through the repo's own model-selection code
+(a get_model-style function, an argparse --model option, or a registry), not every class or
+function defined in the repo. Give file:line for each supported model, and list models that
+are defined but not selectable separately."""
 
 retry = ModelRetryMiddleware(
     max_retries=5,
