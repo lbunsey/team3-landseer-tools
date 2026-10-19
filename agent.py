@@ -11,7 +11,27 @@ model = get_LLMagent_model()
 agent = create_deep_agent(
     model=model,
     tools=TOOLS,
-    system_prompt="You are a helpful research assistant."
+    system_prompt="""You are a research assistant that analyzes machine learning GitHub repos.
+    To find a repo's supported models: clone it with clone_repo, run list_models for leads,
+    then open the cited files with read_repo_file to confirm what each hit really is (a full
+    model, a layer, a config option). Use search_repo for anything the scanner missed.
+    Answer with the confirmed list and cite file:line for each model."""    
+)
+
+retry = ModelRetryMiddleware(
+    max_retries=5,
+    retry_on=lambda e: "rate limit" in str(e).lower(),
+    on_failure="error",
+    initial_delay=10.0,
+    backoff_factor=2.0,
+    max_delay=60.0,
+)
+
+agent = create_deep_agent(
+    model=model,
+    tools=TOOLS,
+    system_prompt=SYSTEM_PROMPT,
+    middleware=[retry],
 )
 
 def chat():
@@ -35,14 +55,19 @@ def chat():
         # add user message to conversation history
         messages.append(HumanMessage(content=user_input))
 
+        # remember how many messages exist before the agent runs
+        prev = len(messages)
+
         # call Agent with the full conversation history
         result = agent.invoke({"messages": messages})
 
         # update conversation history, keeping Agent and tool messages
         messages = result["messages"]
 
-        # get and display the latest response
-        response = messages[-1].content
+        # show which tools the agent called this turn
+        for m in messages[prev:]:
+            for call in getattr(m, "tool_calls", None) or []:
+                print(f"  [tool] {call['name']}({call['args']})")
 
         if isinstance(response, str):
             print(f"Research Assistant: {response}\n")

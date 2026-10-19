@@ -7,7 +7,7 @@ from pathlib import Path
 from langchain_core.tools import tool
 
 # Same folder that clone_repo.py clones into.
-REPOS_DIR = Path(__file__).resolve().parent / "repos"
+REPOS_DIR = Path(__file__).resolve().parent.parent / "repos"
 
 SKIP_DIRS = {".git", "node_modules", "venv", ".venv", "__pycache__", ".idea", ".vscode"}
 SKIP_FILES = {".env"}
