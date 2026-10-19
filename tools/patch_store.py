@@ -5,6 +5,7 @@ application entry points, never agent tools; this module cannot authenticate
 human approval. File validation and application belong to later modules.
 """
 
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
@@ -142,3 +143,18 @@ def mark_applied(patch_id: str) -> PatchRecord:
 This records a status, not a file operation or proof of a successful write.
 """
     return _transition(patch_id, PatchStatus.APPLIED)
+
+
+@contextmanager
+def approved_patch_for_application(patch_id: str):
+    """Internal apply entry: hold lifecycle lock through validation and writing.
+
+Prevents other threads in this process from revoking/superseding approval
+mid-write. Does not lock files or authenticate human approval. The caller
+must mark_applied only after a successful write; failures retain approval.
+"""
+    with _lock:
+        record = get_patch(patch_id)
+        if record.status != PatchStatus.APPROVED or record.approved_at is None:
+            raise ValueError(f"Patch is not approved for application: {record.status.value}")
+        yield record
