@@ -5,6 +5,7 @@ Preview must validate UTF-8 content; apply must revalidate paths and file hashes
 """
 
 import hashlib
+import os
 from pathlib import Path, PureWindowsPath
 import stat
 
@@ -45,13 +46,8 @@ def _reject_link(path: Path) -> None:
         raise ValueError("Symlinks, junctions and reparse points are not permitted")
 
 
-def resolve_target(repo_name: str, file_path: str) -> Path:
-    """Return an existing permitted file inside a direct child of repos/.
-
-Raises ValueError for unsafe/unsupported targets and FileNotFoundError for
-missing paths. This does not read file contents or guarantee UTF-8 encoding.
-Hidden paths, private-key names, links and files over 500 KB are excluded.
-"""
+def _repo_root_and_parts(repo_name: str, file_path: str) -> tuple[Path, tuple[str, ...]]:
+    """Validate both names; return the resolved repo root and the path parts."""
     repo_parts = _path_parts(repo_name)
     if len(repo_parts) != 1 or repo_parts[0].startswith("."):
         raise ValueError("repo_name must be a single non-hidden folder name")
@@ -67,7 +63,17 @@ Hidden paths, private-key names, links and files over 500 KB are excluded.
     root = root.resolve(strict=True)
     if root.parent != repos or not root.is_dir():
         raise ValueError("Repository must be a directory directly inside repos/")
+    return root, parts
 
+
+def resolve_target(repo_name: str, file_path: str) -> Path:
+    """Return an existing permitted file inside a direct child of repos/.
+
+Raises ValueError for unsafe/unsupported targets and FileNotFoundError for
+missing paths. This does not read file contents or guarantee UTF-8 encoding.
+Hidden paths, private-key names, links and files over 500 KB are excluded.
+"""
+    root, parts = _repo_root_and_parts(repo_name, file_path)
     target = root
     for part in parts:
         target = target / part
@@ -81,6 +87,29 @@ Hidden paths, private-key names, links and files over 500 KB are excluded.
         raise ValueError("Unsupported text-file extension")
     if target.stat().st_size > MAX_FILE_BYTES:
         raise ValueError(f"Target exceeds {MAX_FILE_BYTES} bytes")
+    return target
+
+
+def resolve_new_target(repo_name: str, file_path: str) -> Path:
+    """Return the path of a file to create inside a direct child of repos/.
+
+Same name rules as resolve_target. The parent folder must already exist
+inside the repository and nothing may exist at the path yet. Like
+resolve_target, this is a point-in-time check, not a lock.
+"""
+    root, parts = _repo_root_and_parts(repo_name, file_path)
+    parent = root
+    for part in parts[:-1]:
+        parent = parent / part
+        _reject_link(parent)
+    parent = parent.resolve(strict=True)
+    if not parent.is_relative_to(root) or not parent.is_dir():
+        raise ValueError("Parent folder must be an existing directory inside the repository")
+    target = parent / parts[-1]
+    if os.path.lexists(target):
+        raise ValueError("Target already exists; patch the existing file instead")
+    if target.suffix.lower() not in TEXT_EXTENSIONS:
+        raise ValueError("Unsupported text-file extension")
     return target
 
 

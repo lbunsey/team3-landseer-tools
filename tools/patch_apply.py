@@ -21,13 +21,17 @@ class ApplyStatusError(RuntimeError):
     """File replacement succeeded but recording applied status failed."""
 
 
-def atomic_write(target: Path, content: bytes, *, before_replace: Callable[[], None]) -> None:
+def atomic_write(
+    target: Path, content: bytes, *, before_replace: Callable[[], None], create: bool = False,
+) -> None:
     """Stage/fsync bytes beside target, revalidate, then replace atomically.
 
 On failure before replacement, the original is untouched and temporary
 files are removed. Does not promise durability across power failure.
+With create=True the target must not exist: the staged file is hard-linked
+into place, which fails instead of overwriting a file that appeared meanwhile.
 """
-    mode = stat.S_IMODE(target.stat().st_mode)
+    mode = 0o644 if create else stat.S_IMODE(target.stat().st_mode)
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -39,7 +43,10 @@ files are removed. Does not promise durability across power failure.
             os.fsync(stream.fileno())
         os.chmod(temporary, mode)
         before_replace()
-        os.replace(temporary, target)
+        if create:
+            os.link(temporary, target)
+        else:
+            os.replace(temporary, target)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
@@ -56,12 +63,15 @@ def apply_saved_patch(patch_id: str) -> patch_store.PatchRecord:
         updated_text = record.updated_content.decode("utf-8")
         if "\x00" in updated_text:
             raise ValueError("Saved proposed contents contain NUL characters")
-        target = patch_utils.resolve_target(record.repo_name, record.file_path)
+        resolve = patch_utils.resolve_new_target if record.creates_file else patch_utils.resolve_target
+        target = resolve(record.repo_name, record.file_path)
 
         def validate_current() -> None:
-            current_target = patch_utils.resolve_target(record.repo_name, record.file_path)
+            current_target = resolve(record.repo_name, record.file_path)
             if current_target != target:
                 raise ValueError("Target path changed after validation")
+            if record.creates_file:
+                return   # resolve_new_target already checked that nothing exists there
             with current_target.open("rb") as stream:
                 current = stream.read(patch_utils.MAX_FILE_BYTES + 1)
             if patch_utils.compute_file_hash(current) != record.original_hash:
@@ -69,7 +79,10 @@ def apply_saved_patch(patch_id: str) -> patch_store.PatchRecord:
 
         print(f"[DEBUG][patch_apply] Checking current file hash: {patch_id}", flush=True)
         validate_current()
-        atomic_write(target, record.updated_content, before_replace=validate_current)
+        atomic_write(
+            target, record.updated_content, before_replace=validate_current,
+            create=record.creates_file,
+        )
         try:
             applied = patch_store.mark_applied(patch_id)
         except Exception as exc:

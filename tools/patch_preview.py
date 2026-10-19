@@ -21,6 +21,7 @@ class PreparedPatch:
     original_content: bytes
     updated_content: bytes
     diff: str
+    creates_file: bool = False
 
 
 def prepare_patch(
@@ -56,20 +57,48 @@ contents. Valid UTF-8 alone does not imply syntactically valid Python.
         raise ValueError("Patch must change the contents")
 
     relative = file_path.replace("\\", "/")
+    return PreparedPatch(
+        repo_name=repo_name, file_path=relative, original_hash=original_hash,
+        original_content=original, updated_content=updated,
+        diff=_unified_diff(original_text, updated_content, f"a/{relative}", f"b/{relative}"),
+    )
+
+
+def prepare_new_file(repo_name: str, file_path: str, content: str) -> PreparedPatch:
+    """Validate a proposed NEW file, returning an unsaved proposal.
+
+The folder must exist inside the repository and the file must not. The base
+is empty, so original_hash is the SHA-256 of zero bytes.
+"""
+    if not isinstance(content, str):
+        raise TypeError("content must be the full file as a UTF-8 string")
+    patch_utils.resolve_new_target(repo_name, file_path)
+    updated = content.encode("utf-8")
+    if len(updated) > patch_utils.MAX_FILE_BYTES:
+        raise ValueError("Proposed file exceeds the patch size limit")
+    if not updated or "\x00" in content:
+        raise ValueError("A new file must be non-empty text without NUL characters")
+    relative = file_path.replace("\\", "/")
+    return PreparedPatch(
+        repo_name=repo_name, file_path=relative,
+        original_hash=patch_utils.compute_file_hash(b""),
+        original_content=b"", updated_content=updated,
+        diff=_unified_diff("", content, "/dev/null", f"b/{relative}"),
+        creates_file=True,
+    )
+
+
+def _unified_diff(original_text: str, updated_text: str, fromfile: str, tofile: str) -> str:
     diff_lines = difflib.unified_diff(
         original_text.splitlines(keepends=True),
-        updated_content.splitlines(keepends=True),
-        fromfile=f"a/{relative}", tofile=f"b/{relative}",
+        updated_text.splitlines(keepends=True),
+        fromfile=fromfile, tofile=tofile,
     )
     # difflib omits this marker; without it, EOF additions/removals can appear
     # concatenated or indistinguishable. Preserve CRLF inside the diff too.
-    diff = "".join(
+    return "".join(
         line if line.endswith("\n") else line + "\n\\ No newline at end of file\n"
         for line in diff_lines
-    )
-    return PreparedPatch(
-        repo_name=repo_name, file_path=relative, original_hash=original_hash,
-        original_content=original, updated_content=updated, diff=diff,
     )
 
 
@@ -78,14 +107,14 @@ def _save_prepared(
 ) -> patch_store.PatchRecord:
     if parent_patch_id is not None:
         parent = patch_store.get_patch(parent_patch_id)
-        if parent.original_hash != prepared.original_hash:
+        if (parent.original_hash, parent.creates_file) != (prepared.original_hash, prepared.creates_file):
             raise ValueError("Parent has a different base; start a new proposal")
     return patch_store.create_patch_record(
         session_id=session_id, repo_name=prepared.repo_name,
         file_path=prepared.file_path, original_hash=prepared.original_hash,
         original_content=prepared.original_content,
         updated_content=prepared.updated_content, diff=prepared.diff,
-        parent_patch_id=parent_patch_id,
+        parent_patch_id=parent_patch_id, creates_file=prepared.creates_file,
     )
 
 
@@ -98,10 +127,15 @@ an agent tool. A changed base requires a newly prepared proposal instead.
 """
     print(f"[DEBUG][patch_preview] Restoring proposal: {source_patch_id}", flush=True)
     source = patch_store.get_patch(source_patch_id)
-    prepared = prepare_patch(
-        source.repo_name, source.file_path,
-        source.updated_content.decode("utf-8"), source.original_hash,
-    )
+    if source.creates_file:
+        prepared = prepare_new_file(
+            source.repo_name, source.file_path, source.updated_content.decode("utf-8"),
+        )
+    else:
+        prepared = prepare_patch(
+            source.repo_name, source.file_path,
+            source.updated_content.decode("utf-8"), source.original_hash,
+        )
     record = _save_prepared(prepared, source.session_id, source.patch_id)
     print(f"[DEBUG][patch_preview] Saved restored patch: {record.patch_id}", flush=True)
     return record

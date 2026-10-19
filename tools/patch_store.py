@@ -36,6 +36,7 @@ class PatchRecord:
     status: PatchStatus = PatchStatus.PENDING_REVIEW
     approved_at: datetime | None = None
     applied_at: datetime | None = None
+    creates_file: bool = False   # True: original_content is empty and the file must not exist yet
 
 
 _records: dict[str, PatchRecord] = {}
@@ -54,6 +55,12 @@ def list_session_patches(session_id: str) -> tuple[PatchRecord, ...]:
         return tuple(p for p in _records.values() if p.session_id == session_id)
 
 
+def list_pending_patches() -> tuple[PatchRecord, ...]:
+    """Return every proposal awaiting human review, in creation order."""
+    with _lock:
+        return tuple(p for p in _records.values() if p.status == PatchStatus.PENDING_REVIEW)
+
+
 def create_patch_record(
     *,
     session_id: str,
@@ -64,6 +71,7 @@ def create_patch_record(
     updated_content: bytes,
     diff: str,
     parent_patch_id: str | None = None,
+    creates_file: bool = False,
 ) -> PatchRecord:
     """Save prepared contents, superseding an active parent atomically.
 
@@ -83,6 +91,8 @@ Paths, hashes and diffs must be validated by the preview workflow.
         raise TypeError("diff must be a string")
     if original_content == updated_content:
         raise ValueError("Patch must change the contents")
+    if creates_file and original_content:
+        raise ValueError("A new-file patch must have empty original contents")
 
     with _lock:
         parent = get_patch(parent_patch_id) if parent_patch_id is not None else None
@@ -98,7 +108,7 @@ Paths, hashes and diffs must be validated by the preview workflow.
             file_path=file_path, original_hash=original_hash,
             original_content=original_content, updated_content=updated_content,
             diff=diff, created_at=datetime.now(timezone.utc),
-            parent_patch_id=parent_patch_id,
+            parent_patch_id=parent_patch_id, creates_file=creates_file,
         )
         if parent is not None and parent.status in (
             PatchStatus.PENDING_REVIEW, PatchStatus.APPROVED,

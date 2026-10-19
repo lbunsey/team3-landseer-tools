@@ -5,6 +5,7 @@ from deepagents import create_deep_agent
 from model_factory import get_LLMagent_model
 from langchain_core.messages import HumanMessage
 from tools import *
+from tools.patch_review import review_pending_patches
 
 load_dotenv()
 
@@ -39,6 +40,10 @@ agent = create_deep_agent(
     8. Respond directly to the user's request, summarizing relevant findings,
     actions taken, and any remaining limitations.
     9. Keep responses clear, concise, and technically accurate.
+    10. Tools that change a repository (such as add_model) only propose
+    patches. The user approves or rejects them after your reply, so say
+    what was proposed, never that it was applied, unless a later
+    "Patch review" message reports that it was.
     """,
 )
 
@@ -92,6 +97,11 @@ def chat():
                 if isinstance(item, dict) and item.get("type") == "text"
             )
             print(f"Research Assistant: {text}\n")
+
+        # proposed repo changes need a human yes/no before anything is written
+        review = review_pending_patches()
+        if review:
+            messages.append(HumanMessage(content=f"[CLI] {review}"))
 
 
 if __name__ == "__main__":
