@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 from deepagents import create_deep_agent
 from model_factory import get_LLMagent_model
 from langchain_core.messages import HumanMessage
+from langchain.agents.middleware import ModelRetryMiddleware
 from tools import *
 
 load_dotenv()
