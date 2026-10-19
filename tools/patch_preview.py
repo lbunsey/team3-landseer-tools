@@ -2,7 +2,7 @@
 
 Callers supply the FULL proposed file and the hash of the base they inspected.
 No newline or BOM normalization is performed. Records are process-local.
-This module is intentionally not registered in tools.TOOLS yet.
+CLI confirmation is required before the saved proposal can be applied.
 """
 
 from dataclasses import dataclass
@@ -105,6 +105,27 @@ an agent tool. A changed base requires a newly prepared proposal instead.
     record = _save_prepared(prepared, source.session_id, source.patch_id)
     print(f"[DEBUG][patch_preview] Saved restored patch: {record.patch_id}", flush=True)
     return record
+
+
+@tool
+def restore_patch_proposal(source_patch_id: str) -> dict:
+    """Restore a previous saved proposal as a NEW pending-review Patch ID.
+
+No file is written, no approval is inherited. Other branches remain in
+history. Rejects changed original files; inspect again for a new base.
+"""
+    try:
+        record = restore_patch(source_patch_id)
+    except (ValueError, TypeError, KeyError, OSError) as exc:
+        message = f"{type(exc).__name__}: {exc}"
+        print(f"[ERROR][patch_preview] Restore rejected: {message}", flush=True)
+        return {"ok": False, "error": message}
+    return {
+        "ok": True, "patch_id": record.patch_id, "session_id": record.session_id,
+        "repo_name": record.repo_name, "file_path": record.file_path,
+        "parent_patch_id": record.parent_patch_id,
+        "status": record.status.value, "diff": record.diff,
+    }
 
 
 @tool

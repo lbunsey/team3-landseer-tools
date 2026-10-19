@@ -1,6 +1,6 @@
 """Apply exact saved bytes after trusted application approval.
 
-Not registered in tools.TOOLS yet. Human Y/N confirmation belongs to the CLI.
+Human Y/N confirmation belongs to the CLI, not the model.
 Checks reduce, but do not eliminate, external hash-check/replace races.
 Atomic replacement preserves basic mode bits, not arbitrary ACLs/metadata;
 it is not a transaction with the volatile patch store or crash recovery.
