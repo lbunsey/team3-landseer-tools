@@ -103,7 +103,7 @@ Helpers and `approve_patch` are not agent tools. The CLI records direct human ap
 
 Overview excerpts are capped at 6,000 characters per file; they are not complete edit bases. With `file_path`, inspection returns a JSON string containing `content`, `original_hash`, `size_bytes`, `encoding` and `complete=true`. Single-file content has no added line numbers and is not truncated. Invalid reads return an error string.
 
-Reads use strict UTF-8. Exact bytes, including BOM and CRLF/LF, determine SHA-256. Preview accepts the FULL proposed file and expected base hash without newline normalization. No-op, stale, unsafe or oversized proposals are rejected. Previews never write repository files.
+Reads use strict UTF-8. Exact original bytes, including BOM and CRLF/LF, determine SHA-256. Preview accepts the FULL proposed file and expected base hash, then preserves the original file's LF or CRLF style before generating the diff and saving the proposal. Originals with mixed LF/CRLF or bare CR endings are rejected; files without line endings use LF for new lines. Apply writes the exact saved proposal without further conversion. No-op, stale, unsafe or oversized proposals are rejected. Previews never write repository files.
 
 Large tool-output offloading is disabled so full reads are not replaced with head/tail summaries. Model context/output limits still apply. Full content does not prove the model understood it or the modification is correct; review the complete diff before approving.
 

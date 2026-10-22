@@ -1,7 +1,8 @@
 """Read-only previews of single-file UTF-8 patches; no repository writes.
 
 Callers supply the FULL proposed file and the hash of the base they inspected.
-No newline or BOM normalization is performed. Records are process-local.
+Proposed line endings follow the original file; BOM is not normalized.
+Records are process-local.
 CLI confirmation is required before the saved proposal can be applied.
 """
 
@@ -21,6 +22,24 @@ class PreparedPatch:
     original_content: bytes
     updated_content: bytes
     diff: str
+
+
+def _preserve_line_endings(original: str, proposed: str) -> str:
+    """Keep a uniform base's LF/CRLF style before diffing and saving.
+
+Reject mixed or bare-CR bases rather than silently rewriting unrelated
+lines. A base with no newline uses LF for newly introduced lines. Whether
+the proposal ends with a newline is preserved.
+"""
+    original_lf = original.replace("\r\n", "\n")
+    if "\r" in original_lf:
+        raise ValueError("Bare CR line endings are not supported")
+    if "\r\n" in original and "\n" in original.replace("\r\n", ""):
+        raise ValueError("Mixed LF/CRLF original: normalize the file separately before previewing")
+    proposed_lf = proposed.replace("\r\n", "\n")
+    if "\r" in proposed_lf:
+        raise ValueError("Proposed content contains unsupported bare CR line endings")
+    return proposed_lf.replace("\n", "\r\n") if "\r\n" in original else proposed_lf
 
 
 def prepare_patch(
@@ -43,8 +62,7 @@ contents. Valid UTF-8 alone does not imply syntactically valid Python.
     # Bounded read also covers file growth after resolve_target's size check.
     with target.open("rb") as stream:
         original = stream.read(patch_utils.MAX_FILE_BYTES + 1)
-    updated = updated_content.encode("utf-8")
-    if max(len(original), len(updated)) > patch_utils.MAX_FILE_BYTES:
+    if len(original) > patch_utils.MAX_FILE_BYTES:
         raise ValueError("Original or proposed file exceeds the patch size limit")
     original_hash = patch_utils.compute_file_hash(original)
     if original_hash != expected_hash:
@@ -52,6 +70,10 @@ contents. Valid UTF-8 alone does not imply syntactically valid Python.
     original_text = original.decode("utf-8")
     if "\x00" in original_text or "\x00" in updated_content:
         raise ValueError("NUL-containing files are not supported text files")
+    updated_content = _preserve_line_endings(original_text, updated_content)
+    updated = updated_content.encode("utf-8")
+    if len(updated) > patch_utils.MAX_FILE_BYTES:
+        raise ValueError("Original or proposed file exceeds the patch size limit")
     if original == updated:
         raise ValueError("Patch must change the contents")
 
@@ -140,6 +162,8 @@ def preview_patch(
     """Preview a single existing UTF-8 file without modifying it.
 
 Supply the FULL proposed file and SHA-256 of the exact inspected base bytes.
+Proposed LF/CRLF endings are converted to the original file's uniform style
+before diff generation and storage. Mixed-ending originals are rejected.
 Use the same session_id and parent_patch_id for a revision. Every successful
 call saves a new pending-review ID and returns the full, untruncated diff.
 No approval or application occurs. Errors do not save or supersede records.
