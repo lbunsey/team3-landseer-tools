@@ -1,6 +1,6 @@
 # Landseer Agent Tools
 
-A provider-configurable LangChain / Deep Agents CLI for inspecting research repositories and proposing single-file edits with explicit human approval.
+A provider-configurable LangChain / Deep Agents CLI for inspecting research repositories and preparing dataset integrations through file modifications and additions with explicit human approval.
 
 ## Setup
 
@@ -51,6 +51,10 @@ Repositories are direct children of the project's `repos/` directory. Ask the ag
 
 For code changes, the agent saves a proposal with a unique Patch ID. You can request revisions or restore an earlier proposal. Before applying a patch, the CLI displays the complete saved diff and asks for Y/N confirmation.
 
+To add a dataset, describe the repository, dataset and intended experiment in plain language. The model analyzes the repository and proposes code; `add_dataset` manages the integration task, patch batches and application status. You review and approve each file separately, then run the supplied validation steps yourself. `code_applied_unverified` means the code was applied, not that the experiment works. Task histories are lost when the process exits.
+
+New files use the same patch workflow. `preview_patch` accepts `operation="create"` with `expected_hash=""`; the target must not exist and its parent directory must already exist. The file is only created after approval, and a file created in the meantime is never overwritten.
+
 | Confirmation input | Result |
 | --- | --- |
 | `Y` / `y` | Approve the displayed ID, resume, recheck the hash and attempt the write |
@@ -71,6 +75,7 @@ langchain_agent/
 │   ├── clone_repo.py
 │   ├── list_datasets.py
 │   ├── inspect_repo.py
+│   ├── add_dataset.py
 │   ├── patch_store.py
 │   ├── patch_utils.py
 │   ├── patch_preview.py
@@ -89,6 +94,7 @@ langchain_agent/
 | `preview_patch(...)` | Validate a full proposed file, create diff and save version |
 | `restore_patch_proposal(source_patch_id)` | Restore old contents under a new pending-review ID |
 | `apply_patch(patch_id)` | Apply saved bytes after approval and validation |
+| `add_dataset(...)` | Manage dataset integration tasks, save modification/creation proposals and track application status |
 
 | Patch module | Main functions |
 | --- | --- |
@@ -98,6 +104,20 @@ langchain_agent/
 | `patch_apply.py` | `atomic_write`, `apply_saved_patch`, `apply_patch` |
 
 Helpers and `approve_patch` are not agent tools. The CLI records direct human approval. The synchronous agent binds patches to its thread rather than trusting the model's session argument. Built-in virtual-file tools, shell execution and subagent dispatch are filtered from model requests and rejected at the tool boundary. The backend stays `StateBackend`, not a local disk backend. New agent tools must be deliberately added to `tools/__init__.py`.
+
+### Dataset integration workflow
+
+`add_dataset` supports three actions:
+
+| Action | Behavior |
+| --- | --- |
+| `plan` | Create a session-bound Task ID and return a repository overview with an integration checklist. |
+| `preview` | Validate and save model-provided file changes as a patch batch, including reasons and manual validation steps. No target files are written. |
+| `status` | Report the latest batch as pending review, needing revision, partially applied or applied but unverified. |
+
+Unresolved questions are retained in the task and block preview creation. After discussing them with the user, the agent submits `open_questions=[]` and records the agreed choices in the integration summary. Revisions retain earlier patch batches. Each Patch ID still requires separate CLI approval; multi-file application can be partial.
+
+This first version manages the proposal workflow rather than automatically producing a verified dataset integration. It does not enforce complete-read evidence, structured requirement compliance or cross-file interface correctness. Dataset-related edits can still use `preview_patch` directly, so the dataset workflow is not mandatory. Review the proposed code and manually validate it before treating the integration as complete.
 
 ### Complete reads and previews
 
@@ -127,10 +147,10 @@ If writing succeeds but status update fails, `ok=false, file_written=true` means
 
 ## Current scope and limits
 
-- One existing UTF-8 file per patch; original/proposed content each limited to 500,000 bytes. No creation/deletion or multi-file transaction.
+- One existing or new UTF-8 file per patch; original/proposed content each limited to 500,000 bytes. New files require an existing parent directory. Deletion, rename and multi-file application transactions are not supported.
 - Extensions: `.py`, `.yaml`, `.yml`, `.json`, `.toml`, `.ini`, `.cfg`, `.md`, `.txt`. Hidden paths, private-key names, links/junctions, unsafe Windows paths and targets outside the repository are rejected.
 - Records/checkpoints are volatile. No persistence, crash recovery or cross-process transaction is implemented or required for this prototype.
 - Hash rechecks detect ordinary edits but cannot eliminate the small race before replacement. Basic mode bits are preserved; arbitrary ACLs/metadata may not be.
 - Full replacement can include unintended deletions. Hash/UTF-8 validation does not establish semantic correctness or valid Python syntax.
 - Invocation is synchronous CLI. Programmatic callers must implement trusted confirmation/interrupt handling; helpers are not an authentication boundary.
-- Automatic dataset/model integration (`add_dataset`, etc.) is not implemented.
+- Dataset analysis and code proposals are model-assisted; downloads, training and validation remain manual. General model integration is not implemented as a dedicated tool.
