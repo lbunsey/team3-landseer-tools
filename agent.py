@@ -3,6 +3,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from deepagents import create_deep_agent
+from langchain.agents.middleware import ModelRetryMiddleware
 from model_factory import get_LLMagent_model
 from langchain_core.messages import HumanMessage
 from tools import *
@@ -16,53 +17,42 @@ model = get_LLMagent_model()
 REPOS_DIR = Path(__file__).resolve().parent / "repos"
 CLONED = sorted(p.name for p in REPOS_DIR.iterdir() if p.is_dir()) if REPOS_DIR.is_dir() else []
 
+SYSTEM_PROMPT = """You are a research assistant that analyzes machine learning GitHub repos.
+Workflow: clone the repo with clone_repo, run list_models for leads, then open the cited
+files with read_repo_file to confirm them. Use search_repo for anything the scanner missed.
+"Supported" means a model that can be selected through the repo's own model-selection code
+(a get_model-style function, an argparse --model option, or a registry), not every class or
+function defined in the repo. Give file:line for each supported model, and list models that
+are defined but not selectable separately.
+
+Cloned repos live on disk in the local repos/ folder, and only the repository tools
+(clone_repo, list_models, list_datasets, list_repo_files, read_repo_file, search_repo,
+inspect_repo, add_model) can see them. The built-in ls, read_file, write_file and edit_file
+tools use a separate, empty scratch space: never use them for repository code, and never
+conclude a repo is missing because they cannot find it. When the user names a repo, call a
+repository tool with that name first; only ask for a GitHub URL if the tool says it is not
+in repos/.
+
+To add a model to a repo, call add_model(repo_name, model_name) directly; it inspects the
+repo itself. Tools that change a repo only propose patches: the user approves or rejects
+them at a prompt after your reply, so say what was proposed, never that it was applied,
+unless a later "Patch review" message reports that it was."""
+SYSTEM_PROMPT += f"\nRepositories already cloned in repos/: {', '.join(CLONED) or 'none yet'}"
+
+retry = ModelRetryMiddleware(
+    max_retries=5,
+    retry_on=lambda e: "rate limit" in str(e).lower(),
+    on_failure="error",
+    initial_delay=10.0,
+    backoff_factor=2.0,
+    max_delay=60.0,
+)
+
 agent = create_deep_agent(
     model=model,
     tools=TOOLS,
-    system_prompt = """
-    You are a research assistant specializing in machine learning benchmarking
-    and research code repositories.
-
-    Your goal is to help users understand, manage, and work with research
-    projects, including their code, models, datasets, dependencies, and
-    benchmarking workflows.
-
-    Rules:
-
-    1. Understand the user's intent before deciding which actions to take.
-    2. Use available tools when they are relevant to the user's request.
-    3. When a task requires multiple steps, perform them in a logical order
-    and use the results of earlier steps to guide subsequent actions.
-    4. Treat tool results as the primary evidence for findings obtained
-    through those tools. Do not claim that an operation succeeded unless
-    the results support that conclusion.
-    5. Do not repeatedly invoke the same tool with identical inputs unless
-    there is a clear reason to retry.
-    6. Do not invent tool outputs or claim to have inspected files, executed
-    code, or modified a repository without evidence that the action occurred.
-    7. If the available tools cannot fully satisfy a request, explain the
-    limitation clearly and provide the most useful answer possible.
-    8. Respond directly to the user's request, summarizing relevant findings,
-    actions taken, and any remaining limitations.
-    9. Keep responses clear, concise, and technically accurate.
-    10. Tools that change a repository (such as add_model) only propose
-    patches. The user approves or rejects them after your reply, so say
-    what was proposed, never that it was applied, unless a later
-    "Patch review" message reports that it was.
-    11. Cloned repositories live on disk in the local repos/ folder. Only the
-    repository tools (clone_repo, inspect_repo, list_datasets, add_model)
-    can see them. The built-in ls, read_file, write_file and edit_file tools
-    use a separate, empty scratch space, so never use them to look for or
-    change repository code, and never conclude a repo is missing because
-    they cannot find it. To read a repository file, use inspect_repo with
-    its file_path.
-    12. To add a model to a repository, call add_model(repo_name,
-    model_name) directly. It inspects the repository itself, so you do not
-    need to read the code first.
-    13. When the user names a repository, call a repository tool with that
-    name before anything else. Only ask for a GitHub URL if the tool says
-    the repository is not in repos/.
-    """ + f"\n    Repositories already cloned in repos/: {', '.join(CLONED) or 'none yet'}\n",
+    system_prompt=SYSTEM_PROMPT,
+    middleware=[retry],
 )
 
 def chat():
@@ -85,7 +75,10 @@ def chat():
 
         # add user message to conversation history
         messages.append(HumanMessage(content=user_input))
-        
+
+        # remember how many messages exist before the agent runs
+        prev = len(messages)
+
         # Call agent and show progress
         print("[DEBUG][agent] Sending request to agent...", flush=True)
         
@@ -95,6 +88,7 @@ def chat():
                 config={"recursion_limit": 50},
             )
         except Exception as e:
+            messages.pop()  # drop the unanswered message so the history stays consistent
             print(f"[ERROR][agent] {type(e).__name__}: {e}", flush=True)
             continue
         
@@ -102,6 +96,11 @@ def chat():
         
         # update conversation history, keeping Agent and tool messages
         messages = result["messages"]
+
+        # show which tools the agent called this turn
+        for m in messages[prev:]:
+            for call in getattr(m, "tool_calls", None) or []:
+                print(f"  [tool] {call['name']}({call['args']})")
 
         # get and display the latest response
         response = messages[-1].content
