@@ -177,13 +177,38 @@ def list_datasets(repo_name: str) -> str:
     Read-only: it never runs the repo's code. Returns an error message if the repo is not found.
     """
     name = repo_name.strip().rstrip("/")
+    
+    print(f"[DEBUG][list_datasets] list_datasets started: {name}", flush=True)
+
     if not name or Path(name).name != name or name in (".", ".."):   # a folder name, not a path
         return "Error: repo_name must be a folder name inside 'repos', not a path."
     root = REPOS_DIR / name
     if root.is_symlink() or not root.is_dir():
         available = sorted(p.name for p in REPOS_DIR.iterdir() if p.is_dir()) if REPOS_DIR.is_dir() else []
         return f"Error: repo '{name}' not found in repos/. Available repos: {', '.join(available) or 'none'}."
-    return make_report(name, *scan_repo(root))[:6000]
+    
+    print(f"[DEBUG][list_datasets] Scanning repository: {root}", flush=True)
+    
+    try:
+        found, mentioned, count = scan_repo(root)
+
+        print(
+            f"[DEBUG][list_datasets] Scan completed: {count} files, ",
+            flush=True,
+        )
+
+        report = make_report(name, found, mentioned, count)[:6000]
+
+        print("[DEBUG][list_datasets] list_datasets finished.", flush=True)
+        return report
+
+    except Exception as e:
+        print(
+            f"[ERROR][list_datasets] list_datasets failed: "
+            f"{type(e).__name__}: {e}",
+            flush=True,
+        )
+        raise
 
 
 if __name__ == "__main__":
