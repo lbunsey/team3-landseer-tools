@@ -1,3 +1,5 @@
+from pyexpat.errors import messages
+
 from dotenv import load_dotenv
 from deepagents import create_deep_agent
 from langchain.agents.middleware import ModelRetryMiddleware
@@ -57,9 +59,21 @@ def chat():
         # remember how many messages exist before the agent runs
         prev = len(messages)
 
-        # call Agent with the full conversation history
-        result = agent.invoke({"messages": messages})
-
+        # Call agent and show progress
+        print("[DEBUG] Sending request to agent...", flush=True)
+        
+        try:
+            result = agent.invoke(
+                {"messages": messages},
+                config={"recursion_limit": 20},
+            )
+        except Exception as e:
+            messages.pop()  # drop the unanswered message so the history stays consistent
+            print(f"[ERROR] {type(e).__name__}: {e}", flush=True)
+            continue
+        
+        print("[DEBUG] Agent invocation completed.", flush=True)
+        
         # update conversation history, keeping Agent and tool messages
         messages = result["messages"]
 
