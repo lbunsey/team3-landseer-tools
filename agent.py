@@ -1,4 +1,5 @@
 from pyexpat.errors import messages
+from pathlib import Path
 
 from dotenv import load_dotenv
 from deepagents import create_deep_agent
@@ -10,6 +11,10 @@ from tools.patch_review import review_pending_patches
 load_dotenv()
 
 model = get_LLMagent_model()
+
+# repos cloned in earlier sessions, so the agent knows they exist without looking
+REPOS_DIR = Path(__file__).resolve().parent / "repos"
+CLONED = sorted(p.name for p in REPOS_DIR.iterdir() if p.is_dir()) if REPOS_DIR.is_dir() else []
 
 agent = create_deep_agent(
     model=model,
@@ -44,7 +49,20 @@ agent = create_deep_agent(
     patches. The user approves or rejects them after your reply, so say
     what was proposed, never that it was applied, unless a later
     "Patch review" message reports that it was.
-    """,
+    11. Cloned repositories live on disk in the local repos/ folder. Only the
+    repository tools (clone_repo, inspect_repo, list_datasets, add_model)
+    can see them. The built-in ls, read_file, write_file and edit_file tools
+    use a separate, empty scratch space, so never use them to look for or
+    change repository code, and never conclude a repo is missing because
+    they cannot find it. To read a repository file, use inspect_repo with
+    its file_path.
+    12. To add a model to a repository, call add_model(repo_name,
+    model_name) directly. It inspects the repository itself, so you do not
+    need to read the code first.
+    13. When the user names a repository, call a repository tool with that
+    name before anything else. Only ask for a GitHub URL if the tool says
+    the repository is not in repos/.
+    """ + f"\n    Repositories already cloned in repos/: {', '.join(CLONED) or 'none yet'}\n",
 )
 
 def chat():
@@ -74,7 +92,7 @@ def chat():
         try:
             result = agent.invoke(
                 {"messages": messages},
-                config={"recursion_limit": 20},
+                config={"recursion_limit": 50},
             )
         except Exception as e:
             print(f"[ERROR][agent] {type(e).__name__}: {e}", flush=True)
