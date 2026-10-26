@@ -2,6 +2,7 @@ from pyexpat.errors import messages
 
 from dotenv import load_dotenv
 from deepagents import create_deep_agent
+from langchain.agents.middleware import ModelRetryMiddleware
 from model_factory import get_LLMagent_model
 from langchain_core.messages import HumanMessage
 from tools import *
@@ -10,36 +11,28 @@ load_dotenv()
 
 model = get_LLMagent_model()
 
+SYSTEM_PROMPT = """You are a research assistant that analyzes machine learning GitHub repos.
+Workflow: clone the repo with clone_repo, run list_models for leads, then open the cited
+files with read_repo_file to confirm them. Use search_repo for anything the scanner missed.
+"Supported" means a model that can be selected through the repo's own model-selection code
+(a get_model-style function, an argparse --model option, or a registry), not every class or
+function defined in the repo. Give file:line for each supported model, and list models that
+are defined but not selectable separately."""
+
+retry = ModelRetryMiddleware(
+    max_retries=5,
+    retry_on=lambda e: "rate limit" in str(e).lower(),
+    on_failure="error",
+    initial_delay=10.0,
+    backoff_factor=2.0,
+    max_delay=60.0,
+)
+
 agent = create_deep_agent(
     model=model,
     tools=TOOLS,
-    system_prompt = """
-    You are a research assistant specializing in machine learning benchmarking
-    and research code repositories.
-
-    Your goal is to help users understand, manage, and work with research
-    projects, including their code, models, datasets, dependencies, and
-    benchmarking workflows.
-
-    Rules:
-
-    1. Understand the user's intent before deciding which actions to take.
-    2. Use available tools when they are relevant to the user's request.
-    3. When a task requires multiple steps, perform them in a logical order
-    and use the results of earlier steps to guide subsequent actions.
-    4. Treat tool results as the primary evidence for findings obtained
-    through those tools. Do not claim that an operation succeeded unless
-    the results support that conclusion.
-    5. Do not repeatedly invoke the same tool with identical inputs unless
-    there is a clear reason to retry.
-    6. Do not invent tool outputs or claim to have inspected files, executed
-    code, or modified a repository without evidence that the action occurred.
-    7. If the available tools cannot fully satisfy a request, explain the
-    limitation clearly and provide the most useful answer possible.
-    8. Respond directly to the user's request, summarizing relevant findings,
-    actions taken, and any remaining limitations.
-    9. Keep responses clear, concise, and technically accurate.
-    """,
+    system_prompt=SYSTEM_PROMPT,
+    middleware=[retry],
 )
 
 def chat():
@@ -62,7 +55,10 @@ def chat():
 
         # add user message to conversation history
         messages.append(HumanMessage(content=user_input))
-        
+
+        # remember how many messages exist before the agent runs
+        prev = len(messages)
+
         # Call agent and show progress
         print("[DEBUG] Sending request to agent...", flush=True)
         
@@ -72,6 +68,7 @@ def chat():
                 config={"recursion_limit": 20},
             )
         except Exception as e:
+            messages.pop()  # drop the unanswered message so the history stays consistent
             print(f"[ERROR] {type(e).__name__}: {e}", flush=True)
             continue
         
@@ -79,6 +76,11 @@ def chat():
         
         # update conversation history, keeping Agent and tool messages
         messages = result["messages"]
+
+        # show which tools the agent called this turn
+        for m in messages[prev:]:
+            for call in getattr(m, "tool_calls", None) or []:
+                print(f"  [tool] {call['name']}({call['args']})")
 
         # get and display the latest response
         response = messages[-1].content
