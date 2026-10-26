@@ -45,8 +45,11 @@ def _reject_link(path: Path) -> None:
         raise ValueError("Symlinks, junctions and reparse points are not permitted")
 
 
-def resolve_target(repo_name: str, file_path: str) -> Path:
-    """Return an existing permitted file inside a direct child of repos/.
+def resolve_target(repo_name: str, file_path: str, *, allow_missing: bool = False) -> Path:
+    """Return a permitted file inside a direct child of repos/.
+
+allow_missing permits only a missing leaf; its parent must already exist.
+The caller must separately enforce absence for a create operation.
 
 Raises ValueError for unsafe/unsupported targets and FileNotFoundError for
 missing paths. This does not read file contents or guarantee UTF-8 encoding.
@@ -69,16 +72,22 @@ Hidden paths, private-key names, links and files over 500 KB are excluded.
         raise ValueError("Repository must be a directory directly inside repos/")
 
     target = root
-    for part in parts:
+    for index, part in enumerate(parts):
         target = target / part
-        _reject_link(target)
-    target = target.resolve(strict=True)
+        try:
+            _reject_link(target)
+        except FileNotFoundError:
+            if not allow_missing or index != len(parts) - 1:
+                raise
+    target = target.resolve(strict=not allow_missing)
     if not target.is_relative_to(root):
         raise ValueError("Target resolves outside the repository")
-    if not target.is_file():
-        raise ValueError("Target must be an existing regular file")
     if target.suffix.lower() not in TEXT_EXTENSIONS:
         raise ValueError("Unsupported text-file extension")
+    if allow_missing and not target.exists():
+        return target
+    if not target.is_file():
+        raise ValueError("Target must be an existing regular file")
     if target.stat().st_size > MAX_FILE_BYTES:
         raise ValueError(f"Target exceeds {MAX_FILE_BYTES} bytes")
     return target

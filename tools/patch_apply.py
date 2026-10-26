@@ -18,17 +18,18 @@ from . import patch_store, patch_utils
 
 
 class ApplyStatusError(RuntimeError):
-    """File replacement succeeded but recording applied status failed."""
+    """Writing succeeded but a subsequent cleanup or status operation failed."""
 
 
-def atomic_write(target: Path, content: bytes, *, before_replace: Callable[[], None]) -> None:
+def atomic_write(target: Path, content: bytes, *, before_replace: Callable[[], None], create: bool = False) -> None:
     """Stage/fsync bytes beside target, revalidate, then replace atomically.
 
 On failure before replacement, the original is untouched and temporary
 files are removed. Does not promise durability across power failure.
 """
-    mode = stat.S_IMODE(target.stat().st_mode)
+    mode = 0o600 if create else stat.S_IMODE(target.stat().st_mode)
     temporary = None
+    published = False
     try:
         with tempfile.NamedTemporaryFile(
             mode="wb", dir=target.parent, prefix=".patch-", suffix=".tmp", delete=False,
@@ -39,16 +40,32 @@ files are removed. Does not promise durability across power failure.
             os.fsync(stream.fileno())
         os.chmod(temporary, mode)
         before_replace()
-        os.replace(temporary, target)
+        if create:
+            # Same-directory hard link publishes complete staged bytes and
+            # atomically fails if another process created the destination.
+            # No overwrite/partial-write fallback on unsupported filesystems.
+            os.link(temporary, target)
+        else:
+            os.replace(temporary, target)
+        published = True
     finally:
         if temporary is not None:
-            temporary.unlink(missing_ok=True)
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError as exc:
+                if published:
+                    raise ApplyStatusError(
+                        "File was written but staging cleanup failed; inspect file and record before retrying"
+                    ) from exc
+                raise
 
 
 def apply_saved_patch(patch_id: str) -> patch_store.PatchRecord:
     """Apply an approved saved version, never accepting regenerated contents."""
     print(f"[DEBUG][patch_apply] Checking approval: {patch_id}", flush=True)
     with patch_store.approved_patch_for_application(patch_id) as record:
+        if record.operation not in {"modify", "create"}:
+            raise ValueError("Unknown patch operation")
         if patch_utils.compute_file_hash(record.original_content) != record.original_hash:
             raise ValueError("Saved original contents do not match the recorded hash")
         if len(record.updated_content) > patch_utils.MAX_FILE_BYTES:
@@ -56,12 +73,17 @@ def apply_saved_patch(patch_id: str) -> patch_store.PatchRecord:
         updated_text = record.updated_content.decode("utf-8")
         if "\x00" in updated_text:
             raise ValueError("Saved proposed contents contain NUL characters")
-        target = patch_utils.resolve_target(record.repo_name, record.file_path)
+        creating = record.operation == "create"
+        target = patch_utils.resolve_target(record.repo_name, record.file_path, allow_missing=creating)
 
         def validate_current() -> None:
-            current_target = patch_utils.resolve_target(record.repo_name, record.file_path)
+            current_target = patch_utils.resolve_target(record.repo_name, record.file_path, allow_missing=creating)
             if current_target != target:
                 raise ValueError("Target path changed after validation")
+            if creating:
+                if os.path.lexists(current_target):
+                    raise FileExistsError("Create target now exists; no file was overwritten")
+                return
             with current_target.open("rb") as stream:
                 current = stream.read(patch_utils.MAX_FILE_BYTES + 1)
             if patch_utils.compute_file_hash(current) != record.original_hash:
@@ -69,7 +91,10 @@ def apply_saved_patch(patch_id: str) -> patch_store.PatchRecord:
 
         print(f"[DEBUG][patch_apply] Checking current file hash: {patch_id}", flush=True)
         validate_current()
-        atomic_write(target, record.updated_content, before_replace=validate_current)
+        if creating:
+            atomic_write(target, record.updated_content, before_replace=validate_current, create=True)
+        else:
+            atomic_write(target, record.updated_content, before_replace=validate_current)
         try:
             applied = patch_store.mark_applied(patch_id)
         except Exception as exc:
@@ -100,4 +125,5 @@ Rejects pending, superseded, rejected, applied and stale proposals.
         "ok": True, "patch_id": record.patch_id, "repo_name": record.repo_name,
         "file_path": record.file_path, "status": record.status.value,
         "updated_hash": patch_utils.compute_file_hash(record.updated_content),
+        "operation": record.operation,
     }
