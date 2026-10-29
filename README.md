@@ -115,7 +115,17 @@ Helpers and `approve_patch` are not agent tools. The CLI records direct human ap
 | `preview` | Validate and save model-provided file changes as a patch batch, including reasons and manual validation steps. No target files are written. |
 | `status` | Report the latest batch as pending review, needing revision, partially applied or applied but unverified. |
 
-Unresolved questions are retained in the task and block preview creation. After discussing them with the user, the agent submits `open_questions=[]` and records the agreed choices in the integration summary. Revisions retain earlier patch batches. Each Patch ID still requires separate CLI approval; multi-file application can be partial.
+Unresolved questions are retained in the task and block preview creation. After discussing them with the user, the agent submits `open_questions=[]` and records the agreed choices in the integration summary.
+
+| Identifier or grouping | Meaning |
+| --- | --- |
+| Task ID | One dataset integration task, retained throughout discussion and revisions. |
+| Patch batch | A complete proposal version containing all required file patches. `batch_revision` is its version number; there is no separate Batch ID. |
+| Patch ID | One exact proposed modification or addition to one file. |
+
+When revising a proposal, submit only files being changed or added. The next batch retains all other Patch IDs and their approval/application states. For example, revising A in `[A:P1, B:P2]` produces `[A:P3, B:P2]`, not just `[A:P3]`. Identical active proposals reuse their IDs without adding a batch; discussion alone does not create a version. Earlier batches remain in history. Removing files from a proposal is not supported.
+
+Each new Patch ID requires CLI approval. Retained applied patches must not be applied again. Applying only some files reports `partially_applied_unverified`; applying all files in the latest complete batch reports `code_applied_unverified`. Neither status certifies a working experiment, and multi-file application is not atomic.
 
 This first version manages the proposal workflow rather than automatically producing a verified dataset integration. It does not enforce complete-read evidence, structured requirement compliance or cross-file interface correctness. Dataset-related edits can still use `preview_patch` directly, so the dataset workflow is not mandatory. Review the proposed code and manually validate it before treating the integration as complete.
 
@@ -127,9 +137,17 @@ Reads use strict UTF-8. Exact original bytes, including BOM and CRLF/LF, determi
 
 Large tool-output offloading is disabled so full reads are not replaced with head/tail summaries. Model context/output limits still apply. Full content does not prove the model understood it or the modification is correct; review the complete diff before approving.
 
+### Python syntax checks
+
+Before saving a `.py` proposal, preview compiles its contents with the agent's running Python interpreter without executing or importing the code, downloading data or writing bytecode caches. This applies to modifications, new files, restored proposals and changes submitted through `add_dataset`; other file types do not undergo Python syntax checks.
+
+Compilation errors return the filename, line, column and reason. If any proposed Python file fails, no new Patch ID or batch is saved for that submission, previous proposals and approvals remain unchanged, and no target files are written. The agent can correct the error and submit a new preview.
+
+Passing this check does not verify installed dependencies, function arguments, model shapes or experiment correctness, and does not guarantee compatibility with a different Python version. Dataset execution and scientific validation remain manual.
+
 ### Patch revisions
 
-Each successful preview creates an ID and immutable content snapshot. A revision supersedes its active parent without overwriting contents. Restoring a version creates a new child of that source with `pending_review` status; approval is not inherited and other branches are not automatically superseded. Parents describe ancestry, not required application order.
+Each successful standalone `preview_patch` call creates an ID and immutable content snapshot. In dataset batches, unchanged active proposals reuse their existing IDs. A revised file supersedes its active parent without overwriting contents. Restoring a version creates a new child of that source with `pending_review` status; approval is not inherited and other branches are not automatically superseded. Parents describe ancestry, not required application order.
 
 ```text
 pending_review -> approved -> applied
@@ -151,6 +169,6 @@ If writing succeeds but status update fails, `ok=false, file_written=true` means
 - Extensions: `.py`, `.yaml`, `.yml`, `.json`, `.toml`, `.ini`, `.cfg`, `.md`, `.txt`. Hidden paths, private-key names, links/junctions, unsafe Windows paths and targets outside the repository are rejected.
 - Records/checkpoints are volatile. No persistence, crash recovery or cross-process transaction is implemented or required for this prototype.
 - Hash rechecks detect ordinary edits but cannot eliminate the small race before replacement. Basic mode bits are preserved; arbitrary ACLs/metadata may not be.
-- Full replacement can include unintended deletions. Hash/UTF-8 validation does not establish semantic correctness or valid Python syntax.
+- Full replacement can include unintended deletions. Python proposals undergo compile-only checks, but passing syntax checks does not establish semantic correctness or runtime compatibility.
 - Invocation is synchronous CLI. Programmatic callers must implement trusted confirmation/interrupt handling; helpers are not an authentication boundary.
 - Dataset analysis and code proposals are model-assisted; downloads, training and validation remain manual. General model integration is not implemented as a dedicated tool.
