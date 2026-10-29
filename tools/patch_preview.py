@@ -51,8 +51,9 @@ def prepare_patch(
     """Validate the base and proposed text, returning an unsaved proposal.
 
 The expected hash is SHA-256 of exact base bytes, not text normalized by a
-reader. Raises on stale bases, no-op changes, binary/non-UTF-8 or oversized
-contents. Valid UTF-8 alone does not imply syntactically valid Python.
+reader. Raises on stale bases, no-op changes, binary/non-UTF-8, oversized
+contents or Python compilation errors. Compilation never executes code and
+uses the running interpreter's Python version, not the repository's runtime.
 """
     if not isinstance(updated_content, str):
         raise TypeError("updated_content must be the full file as a UTF-8 string")
@@ -91,6 +92,17 @@ contents. Valid UTF-8 alone does not imply syntactically valid Python.
         raise ValueError("Patch must change the contents")
 
     relative = file_path.replace("\\", "/")
+    if target.suffix.lower() == ".py":
+        try:
+            # Decode policy is already strict UTF-8. Strip a leading BOM only
+            # for compilation; preserve it in the actual saved bytes/diff.
+            # dont_inherit prevents this module's future flags affecting code.
+            compile(updated_content.removeprefix("\ufeff"), relative, "exec", dont_inherit=True)
+        except SyntaxError as exc:
+            raise ValueError(
+                f"Python syntax check failed: {relative}, line {exc.lineno}, "
+                f"column {exc.offset} — {exc.msg}"
+            ) from exc
     diff_lines = difflib.unified_diff(
         original_text.splitlines(keepends=True),
         updated_content.splitlines(keepends=True),
@@ -188,6 +200,8 @@ before diff generation and storage. Mixed-ending originals are rejected.
 Use the same session_id and parent_patch_id for a revision. Every successful
 call saves a new pending-review ID and returns the full, untruncated diff.
 No approval or application occurs. Errors do not save or supersede records.
+Python proposals must compile with the running Python version; no code is
+executed/imported. This does not check dependencies or program correctness.
 """
     print(f"[DEBUG][patch_preview] Preparing proposal: {repo_name}/{file_path}", flush=True)
     try:
