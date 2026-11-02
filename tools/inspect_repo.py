@@ -1,10 +1,12 @@
 
 """inspect_repo: inspect a cloned research repository without modifying it."""
 
+import json
 import os
 from pathlib import Path
 
 from langchain_core.tools import tool
+from . import patch_utils
 
 
 REPOS_DIR = Path(__file__).resolve().parent.parent / "repos"
@@ -164,7 +166,9 @@ def inspect_repo(repo_name: str, file_path: str = "") -> str:
         repo_name: Folder name inside the local repos/ directory.
         file_path: Optional path relative to the repository root.
             If omitted, return the file tree and relevant file excerpts.
-            If provided, return the contents of that specific text file.
+            If provided, return JSON with complete UTF-8 content, exact-byte
+            SHA-256 original_hash and complete=true (up to 500,000 bytes).
+            Use this mode before patching; overview excerpts are insufficient.
 
     Returns:
         A repository overview or the requested file contents.
@@ -182,71 +186,30 @@ def inspect_repo(repo_name: str, file_path: str = "") -> str:
             flush=True,
         )
 
+        # Single-file reads share patch validation and preserve exact bytes.
+        if file_path.strip():
+            target = patch_utils.resolve_target(repo_name, file_path)
+            with target.open("rb") as stream:
+                raw = stream.read(patch_utils.MAX_FILE_BYTES + 1)
+            if len(raw) > patch_utils.MAX_FILE_BYTES:
+                raise ValueError("File exceeds the patch size limit")
+            content = raw.decode("utf-8")
+            if "\x00" in content:
+                raise ValueError("NUL-containing files are not supported text files")
+            print("[DEBUG][inspect_repo] Complete file read finished.", flush=True)
+            return json.dumps({
+                "ok": True, "repo_name": repo_name,
+                "file_path": file_path.replace("\\", "/"),
+                "encoding": "utf-8", "size_bytes": len(raw), "complete": True,
+                "original_hash": patch_utils.compute_file_hash(raw), "content": content,
+            }, ensure_ascii=False)
+
         root = get_repo_root(repo_name)
 
         print(
             f"[DEBUG][inspect_repo] Repository resolved: {root}",
             flush=True,
         )
-
-        # Mode 1: read one explicitly requested file.
-        if file_path.strip():
-            relative = Path(file_path)
-
-            if relative.is_absolute() or ".." in relative.parts:
-                print(
-                    f"[ERROR][inspect_repo] Invalid file path: {file_path}",
-                    flush=True,
-                )
-                return "Error: file_path must stay inside the repository."
-
-            target = root / relative
-
-            if not is_safe_text_file(target):
-                print(
-                    f"[ERROR][inspect_repo] File cannot be read: {file_path}",
-                    flush=True,
-                )
-                return (
-                    "Error: file is missing, unsupported, too large, "
-                    "a symlink, or excluded for safety."
-                )
-
-            resolved_target = target.resolve()
-
-            if not resolved_target.is_relative_to(root):
-                print(
-                    f"[ERROR][inspect_repo] File path points outside repository: "
-                    f"{file_path}",
-                    flush=True,
-                )
-                return "Error: file_path points outside the repository."
-
-            print(
-                f"[DEBUG][inspect_repo] Reading file: {relative.as_posix()}",
-                flush=True,
-            )
-
-            content = read_text_file(resolved_target)
-
-            result = (
-                f"Repository: {repo_name}\n"
-                f"File: {relative.as_posix()}\n"
-                f"Read-only inspection; no files were modified.\n\n"
-                f"{content}"
-            )
-
-            print(
-                f"[DEBUG][inspect_repo] File read completed: "
-                f"{relative.as_posix()}",
-                flush=True,
-            )
-            print(
-                "[DEBUG][inspect_repo] inspect_repo finished.",
-                flush=True,
-            )
-
-            return result
 
         # Mode 2: scan the repository and prioritize relevant files.
         print(

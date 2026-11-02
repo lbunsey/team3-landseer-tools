@@ -22,7 +22,6 @@ from .model_templates import find_template, template_names
 
 REPOS_DIR = Path(__file__).resolve().parent.parent / "repos"
 SKIP_DIRS = {"venv", "env", "node_modules", "__pycache__", "site-packages", "build", "dist"}
-SESSION_ID = "add_model"
 
 NAME_WORDS = {"model", "model_name", "model_type", "arch", "architecture",
               "backbone", "network", "net", "net_name", "arch_name"}
@@ -424,7 +423,7 @@ def smoke_test(root, changes, def_rel, factory, call, size):
 
 # ---------- the change ----------
 
-def propose(name, root, model_name, code, input_size):
+def propose(name, root, model_name, code, input_size, session_id):
     target = normalize(model_name)
     if not target:
         return "Error: model_name must contain letters or digits."
@@ -569,17 +568,17 @@ def propose(name, root, model_name, code, input_size):
     proposed = []
     try:
         for rel, text in changes.items():                             # new files first
-            prepared = patch_preview.prepare_new_file(name, rel, text) if rel in new_files else \
+            prepared = patch_preview.prepare_patch(name, rel, text, "", operation="create") if rel in new_files else \
                 patch_preview.prepare_patch(name, rel, text, patch_utils.compute_file_hash(
                     (root / rel).read_bytes()))
-            proposed.append(patch_preview._save_prepared(prepared, SESSION_ID, None))
+            proposed.append(patch_preview._save_prepared(prepared, session_id, None))
     except (ValueError, TypeError, KeyError, OSError) as exc:
         for record in proposed:
             patch_store.reject_patch(record.patch_id)
         return f"Error: could not prepare the patches: {type(exc).__name__}: {exc}"
 
     out = [f"PROPOSED (not applied yet): add model '{key}' to repo '{name}'. The user will see the diffs "
-           "and approve or reject them after your reply.",
+           "and must approve each saved patch through the CLI before it is applied.",
            f"Model code: {origin}",
            "Registered in:", *[f"  - {r}" for r in registered],
            f"Smoke test: {status} ({detail})"]
@@ -587,16 +586,16 @@ def propose(name, root, model_name, code, input_size):
         out.append(f"Once applied, select it with {flag} {key} ({', '.join(sorted(where))})")
     if notes:
         out += ["Notes:", *[f"  - {n}" for n in notes]]
-    out += ["Pending patches:", *[f"  - {r.patch_id[:8]} {r.file_path}" + (" (new file)" if r.creates_file else "")
+    out += ["Pending patches:", *[f"  - {r.patch_id} {r.file_path}" + (" (new file)" if (r.operation == "create") else "")
                                   for r in proposed]]
-    out += ["", "Diff of edited files:", *[r.diff for r in proposed if not r.creates_file]]
+    out += ["", "Diff of edited files:", *[r.diff for r in proposed if not (r.operation == "create")]]
     return "\n".join(out)
 
 
 # ---------- the tool ----------
 
 @tool
-def add_model(repo_name: str, model_name: str, code: str = "", input_size: int = 32) -> str:
+def add_model(repo_name: str, model_name: str, code: str = "", input_size: int = 32, session_id: str = "") -> str:
     """Proposes the code changes that make a cloned repository support a new model.
 
     Input: repo_name, a folder inside the local 'repos' folder; model_name, e.g. 'resnet34',
@@ -607,9 +606,11 @@ def add_model(repo_name: str, model_name: str, code: str = "", input_size: int =
     reuses a definition already in the repo or a built-in template (VGG11-19, PreAct ResNet18/34,
     MobileNetV2), wires it in the same way as the existing models, and builds the model once on a
     scratch copy to check it. Nothing is written: the changes become pending patches that the user
-    approves or rejects after your reply. Returns the plan and diffs, or an error explaining what
+    approves through the CLI. session_id identifies the current conversation and is injected by the agent runtime. Returns the plan and diffs, or an error explaining what
     is missing.
     """
+    if not isinstance(session_id, str) or not session_id.strip():
+        return "Error: session_id must identify the current conversation."
     name = repo_name.strip().rstrip("/")
     print(f"[DEBUG][add_model] add_model started: {name} {model_name}", flush=True)
     if not name or Path(name).name != name or name in (".", ".."):   # a folder name, not a path
@@ -619,7 +620,7 @@ def add_model(repo_name: str, model_name: str, code: str = "", input_size: int =
         available = sorted(p.name for p in REPOS_DIR.iterdir() if p.is_dir()) if REPOS_DIR.is_dir() else []
         return f"Error: repo '{name}' not found in repos/. Available repos: {', '.join(available) or 'none'}."
     try:
-        report = propose(name, root.resolve(), model_name.strip(), code, input_size)
+        report = propose(name, root.resolve(), model_name.strip(), code, input_size, session_id)
     except Exception as e:
         print(f"[ERROR][add_model] add_model failed: {type(e).__name__}: {e}", flush=True)
         raise
@@ -632,5 +633,7 @@ if __name__ == "__main__":
         sys.exit("usage: python -m tools.add_model <repo_name> <model_name> [model_code.py]")
     from .patch_review import review_pending_patches
     source = Path(sys.argv[3]).read_text() if len(sys.argv) == 4 else ""
-    print(add_model.invoke({"repo_name": sys.argv[1], "model_name": sys.argv[2], "code": source}))
-    review_pending_patches()
+    from uuid import uuid4
+    session_id = uuid4().hex
+    print(add_model.invoke({"repo_name": sys.argv[1], "model_name": sys.argv[2], "code": source, "session_id": session_id}))
+    review_pending_patches(session_id=session_id)
