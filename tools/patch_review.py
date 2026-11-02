@@ -8,29 +8,36 @@ tool call (e.g. add_model) can propose several files that only work together.
 from . import patch_apply, patch_store
 
 
-def review_pending_patches(ask=input) -> str:
+def review_pending_patches(ask=input, *, session_id: str) -> str:
     """Show every pending diff, ask once, then apply all or reject all.
 
 Applies in creation order and stops at the first failure, rejecting the
 rest, so a half-applied change set is reported rather than silently left.
 Returns a one-line summary ('' if nothing was pending).
 """
-    pending = patch_store.list_pending_patches()
+    if not isinstance(session_id, str) or not session_id.strip():
+        raise ValueError("session_id must identify the current conversation")
+    pending = tuple(p for p in patch_store.list_pending_patches() if p.session_id == session_id)
     if not pending:
         return ""
 
     print(f"\n{len(pending)} proposed change(s) waiting for your review:\n", flush=True)
     for record in pending:
-        kind = "new file" if record.creates_file else "edit"
+        kind = "new file" if (record.operation == "create") else "edit"
         print(f"=== {record.repo_name}/{record.file_path} ({kind}, patch {record.patch_id[:8]})")
         print(record.diff, flush=True)
 
-    answer = ask(f"Apply all {len(pending)} change(s)? [y/N]: ").strip().lower()
+    try:
+        answer = ask(f"Apply all {len(pending)} change(s)? [y/N]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        answer = "n"
     results = []
     if answer in ("y", "yes"):
         for i, record in enumerate(pending):
             label = f"{record.repo_name}/{record.file_path}"
             try:
+                if patch_store.get_patch(record.patch_id) != record:
+                    raise ValueError("Proposal changed during review; review it again")
                 patch_store.approve_patch(record.patch_id)
                 patch_apply.apply_saved_patch(record.patch_id)
                 results.append(f"applied {label}")
