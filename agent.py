@@ -71,6 +71,15 @@ SYSTEM_PROMPT += """
         dataset proposals, only when the user requests application. There is no
         automatic patch review after your reply. A smoke test is not evidence
         of successful training or dataset integration.
+    18. To see what has been proposed, applied, or undone in this conversation, use
+        list_patches. To undo an APPLIED patch, use revert_patch: it only saves a new
+        pending-review Patch ID and writes nothing. Show its diff; applying it needs the
+        user's request and the same CLI Y/N as any patch. If it is refused because the file
+        changed, revert later patches first (newest first). Reverting a created file is not
+        supported.
+    19. For which attacks a repo supports use list_attacks, and for the command-line flags
+        a script accepts use list_arguments. Both are static scans: confirm leads with
+        read_repo_file or search_repo before stating them as fact.
     """
 REPOS_DIR = Path(__file__).resolve().parent / "repos"
 CLONED = sorted(p.name for p in REPOS_DIR.iterdir() if p.is_dir()) if REPOS_DIR.is_dir() else []
@@ -110,10 +119,10 @@ def build_agent(model=None):
             session = request.runtime.config.get("configurable", {}).get("thread_id")
             if name not in names:
                 error = "Tool is disabled; use the repository patch workflow."
-            elif name in {"preview_patch", "restore_patch_proposal", "apply_patch", "add_dataset", "add_model"}:
+            elif name in {"preview_patch", "restore_patch_proposal", "apply_patch", "revert_patch", "list_patches", "add_dataset", "add_model"}:
                 if not isinstance(session, str) or not session:
                     error = "Patch operations require a current conversation thread."
-                elif name in {"preview_patch", "add_dataset", "add_model"}:
+                elif name in {"preview_patch", "add_dataset", "add_model", "list_patches"}:
                     args["session_id"] = session
                 else:
                     key = "source_patch_id" if name == "restore_patch_proposal" else "patch_id"
