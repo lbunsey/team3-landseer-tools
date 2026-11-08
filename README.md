@@ -94,6 +94,10 @@ langchain_agent/
 | `list_datasets(repo_name)` | Static dataset discovery with evidence |
 | `list_models(repo_name)` | Static model discovery with evidence |
 | `list_repo_files(repo, max_depth=3)` | List repository files |
+| `list_attacks(repo_name)` | Static attack discovery (backdoor or adversarial) with evidence |
+| `list_arguments(repo_name, script="")` | List a repository's argparse arguments with defaults and choices |
+| `list_patches(session_id, repo_name="", status="", limit=30)` | List this session's patch proposals and their status |
+| `revert_patch(patch_id)` | Propose undoing an applied patch as a new pending-review Patch ID |
 | `read_repo_file(repo, path, start_line=1, end_line=300)` | Read a numbered range of repository text |
 | `search_repo(repo, pattern)` | Search repository text |
 | `inspect_repo(repo_name, file_path="")` | Overview or full single-file read |
@@ -105,6 +109,8 @@ langchain_agent/
 
 | Patch module | Main functions |
 | --- | --- |
+| `list_patches.py` | `list_patches` |
+| `revert_patch.py` | `revert_patch_proposal`, `revert_patch` |
 | `patch_store.py` | `create_patch_record`, `get_patch`, `list_session_patches`, lifecycle operations |
 | `patch_utils.py` | `resolve_target`, `compute_file_hash` |
 | `patch_preview.py` | `prepare_patch`, `preview_patch`, internal `restore_patch` and tool wrapper |
@@ -193,3 +199,4 @@ If writing succeeds but status update fails, `ok=false, file_written=true` means
 - Full replacement can include unintended deletions. Python proposals undergo compile-only checks, but passing syntax checks does not establish semantic correctness or runtime compatibility.
 - Invocation is synchronous CLI. Programmatic callers must implement trusted confirmation/interrupt handling; helpers are not an authentication boundary.
 - Dataset analysis and code proposals are model-assisted; dataset downloads, training and validation remain manual. Model integration uses `add_model`, including its internal scratch-copy smoke test; successful proposals or application do not certify experiment correctness.
+- revert_patch cannot undo a patch that created a file (deletion is not supported) and refuses when the file changed after the patch; revert later patches first, newest first.
