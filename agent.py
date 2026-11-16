@@ -64,8 +64,13 @@ SYSTEM_PROMPT += """
         through a factory, registry or CLI from definitions not wired into it.
         list_repo_files, read_repo_file and search_repo are read-only exploration
         tools; before submitting full-file edits use complete inspect_repo reads.
-    17. To add a model, use add_model. It inspects model-selection code and
-        proposes saved patches, possibly after running its scratch smoke test.
+    17. To add a model, call add_model(repo_name, model_name) FIRST, before
+        reading any files: it finds every model selector itself, so rules 10,
+        11 and 16 do not apply to this task. Never write model-registration or
+        model-definition edits with preview_patch. If add_model says the model
+        has no definition or does not fit, write the model code and call
+        add_model again with it as `code`; act on its error messages the same
+        way. add_model proposes saved patches after its scratch smoke test.
         Show the returned full Patch IDs. Do not claim the repository changed.
         Application uses apply_patch with the same CLI Y/N confirmation as
         dataset proposals, only when the user requests application. There is no
