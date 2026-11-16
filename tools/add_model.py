@@ -753,6 +753,8 @@ def propose(name, root, model_name, code, input_size, session_id):
 @tool
 def add_model(repo_name: str, model_name: str, code: str = "", input_size: int = 32, session_id: str = "") -> str:
     """Proposes the code changes that make a cloned repository support a new model.
+    Call this FIRST for any request to add or support a model: it searches the repository
+    itself, so do not read or search files beforehand.
 
     Input: repo_name, a folder inside the local 'repos' folder; model_name, e.g. 'resnet34',
     'vgg16' or 'preactresnet18'; optionally code, the full source of a Python module defining
