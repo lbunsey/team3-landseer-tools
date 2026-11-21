@@ -64,6 +64,7 @@ def apply_saved_patch(patch_id: str) -> patch_store.PatchRecord:
     """Apply an approved saved version, never accepting regenerated contents."""
     print(f"[DEBUG][patch_apply] Checking approval: {patch_id}", flush=True)
     with patch_store.approved_patch_for_application(patch_id) as record:
+        patch_store.assert_dataset_route(record)
         if record.operation not in {"modify", "create"}:
             raise ValueError("Unknown patch operation")
         if patch_utils.compute_file_hash(record.original_content) != record.original_hash:

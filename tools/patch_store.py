@@ -6,6 +6,7 @@ human approval. File validation and application belong to later modules.
 """
 
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
@@ -38,10 +39,43 @@ class PatchRecord:
     approved_at: datetime | None = None
     applied_at: datetime | None = None
     operation: str = "modify"
+    testing_required: bool = False
+    origin: str = "general"
 
 
 _records: dict[str, PatchRecord] = {}
 _lock = RLock()
+_dataset_scopes: set[tuple[str, str]] = set()
+_proposal_context = ContextVar("patch_proposal_context", default=None)
+
+
+@contextmanager
+def model_workflow(session_id: str, repo_name: str):
+    """Trusted runtime boundary, not an agent input or permission grant.
+
+    Lets the unchanged add_model implementation use shared patch helpers
+    alongside dataset work. Context is isolated across concurrent calls.
+    """
+    if not session_id or not repo_name:
+        raise ValueError("Model workflow requires a session and repository")
+    token = _proposal_context.set((session_id, repo_name.strip().rstrip("/").casefold()))
+    try:
+        yield
+    finally:
+        _proposal_context.reset(token)
+
+
+def require_dataset_workflow(session_id: str, repo_name: str) -> None:
+    """Bind writes for this conversation/repo to tested dataset batches."""
+    with _lock:
+        _dataset_scopes.add((session_id, repo_name.casefold()))
+
+
+def assert_dataset_route(record: PatchRecord) -> None:
+    with _lock:
+        if (record.session_id, record.repo_name.casefold()) in _dataset_scopes and not record.testing_required and record.origin != "model":
+            raise ValueError("Active dataset workflow requires association. In the official CLI use the shared preview_patch; runtime records the task association.")
+
 
 
 def get_patch(patch_id: str) -> PatchRecord:
@@ -57,9 +91,16 @@ def list_session_patches(session_id: str) -> tuple[PatchRecord, ...]:
 
 
 def list_pending_patches() -> tuple[PatchRecord, ...]:
-    """Return proposals awaiting human review, in creation order."""
+    """Return pending proposals; model calls exclude dataset-owned proposals.
+
+    The unchanged add_model checks this list before proposing model changes.
+    Dataset proposals must not make its model-only pending check fail.
+    Outside that trusted context the complete pending list is returned.
+    """
     with _lock:
-        return tuple(p for p in _records.values() if p.status == PatchStatus.PENDING_REVIEW)
+        context = _proposal_context.get()
+        return tuple(p for p in _records.values() if p.status == PatchStatus.PENDING_REVIEW
+                     and not (context and p.repo_name.casefold() == context[1] and p.testing_required))
 
 
 def create_patch_record(
@@ -73,6 +114,7 @@ def create_patch_record(
     diff: str,
     parent_patch_id: str | None = None,
     operation: str = "modify",
+    testing_required: bool = False,
 ) -> PatchRecord:
     """Save prepared contents, superseding an active parent atomically.
 
@@ -105,6 +147,15 @@ Paths, hashes and diffs must be validated by the preview workflow.
             raise ValueError("Parent must belong to the same session and target")
         if parent is not None and parent.operation != operation:
             raise ValueError("Parent must use the same patch operation")
+        requires_testing = testing_required or bool(parent and parent.testing_required)
+        if requires_testing:
+            origin = "dataset"
+        elif _proposal_context.get() == (session_id, repo_name.casefold()):
+            origin = "model"
+        else:
+            origin = "general"
+        if (session_id, repo_name.casefold()) in _dataset_scopes and not testing_required and origin != "model":
+            raise ValueError("Active dataset workflow requires association. Use preview_patch through the official CLI so runtime records the task association.")
         patch_id = uuid4().hex
         while patch_id in _records:
             patch_id = uuid4().hex
@@ -115,6 +166,7 @@ Paths, hashes and diffs must be validated by the preview workflow.
             diff=diff, created_at=datetime.now(timezone.utc),
             parent_patch_id=parent_patch_id,
             operation=operation,
+            testing_required=requires_testing, origin=origin,
         )
         if parent is not None and parent.status in (
             PatchStatus.PENDING_REVIEW, PatchStatus.APPROVED,
